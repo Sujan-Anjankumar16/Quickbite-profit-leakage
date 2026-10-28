@@ -1,0 +1,340 @@
+// QuickBite Profit Leakage Analyzer - generated from db/mysql/01_schema.sql
+// Paste into https://dbdiagram.io to see the diagram. The SQL file is the source of truth;
+// CHECK constraints are listed as notes because DBML has no CHECK syntax.
+
+Project quickbite {
+  database_type: 'MySQL'
+  Note: 'MySQL 8.4, 23 tables'
+}
+
+Table region {
+  region_id        "int unsigned" [pk, increment, not null]
+  region_name      varchar(80) [not null, unique]
+  region_type      varchar(20) [not null]
+  parent_region_id "int unsigned"
+
+  Note: 'chk_region_type: region_type IN (\'COUNTRY\', \'STATE\', \'ZONE\')'
+}
+
+Table city {
+  city_id   "int unsigned" [pk, increment, not null]
+  region_id "int unsigned" [not null]
+  city_name varchar(80) [not null]
+  timezone  varchar(40) [not null, default: 'Asia/Kolkata']
+  is_active boolean [not null, default: `TRUE`]
+
+  indexes {
+    (region_id, city_name) [unique, name: 'uq_city_region_name']
+  }
+}
+
+Table customer {
+  customer_id             "int unsigned" [pk, increment, not null]
+  full_name               varchar(100) [not null]
+  email                   varchar(120) [not null, unique]
+  phone                   varchar(15) [not null]
+  referred_by_customer_id "int unsigned"
+  created_at              datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  Note: 'chk_customer_email: email LIKE \'%_@_%._%\'\nchk_customer_phone: phone REGEXP \'^[0-9+][0-9]{9,14}$\''
+}
+
+Table restaurant {
+  restaurant_id   "int unsigned" [pk, increment, not null]
+  city_id         "int unsigned" [not null]
+  restaurant_name varchar(120) [not null]
+  commission_pct  decimal(5,2) [not null]
+  is_active       boolean [not null, default: `TRUE`]
+  created_at      datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (city_id, restaurant_name) [unique, name: 'uq_restaurant_city_name']
+  }
+
+  Note: 'chk_restaurant_commission: commission_pct BETWEEN 0 AND 100'
+}
+
+Table menu_item {
+  menu_item_id  "int unsigned" [pk, increment, not null]
+  restaurant_id "int unsigned" [not null]
+  item_name     varchar(120) [not null]
+  category      varchar(40) [not null]
+  list_price    decimal(10,2) [not null]
+  is_available  boolean [not null, default: `TRUE`]
+
+  indexes {
+    (restaurant_id, item_name) [unique, name: 'uq_menu_item_name']
+  }
+
+  Note: 'chk_menu_item_price: list_price > 0'
+}
+
+Table delivery_partner {
+  partner_id   "int unsigned" [pk, increment, not null]
+  city_id      "int unsigned" [not null]
+  partner_name varchar(100) [not null]
+  is_active    boolean [not null, default: `TRUE`]
+}
+
+Table orders {
+  order_id           "bigint unsigned" [pk, increment, not null]
+  customer_id        "int unsigned" [not null]
+  restaurant_id      "int unsigned" [not null]
+  order_time         datetime [not null]
+  order_status       varchar(20) [not null, default: 'PLACED']
+  delivery_fee       decimal(10,2) [not null, default: 0]
+  platform_fee       decimal(10,2) [not null, default: 0]
+  packaging_fee      decimal(10,2) [not null, default: 0]
+  distance_km        decimal(5,2) [not null]
+  is_peak_period     boolean [not null, default: `FALSE`]
+  is_rainy_weather   boolean [not null, default: `FALSE`]
+  cancellation_stage varchar(20)
+
+  indexes {
+    (order_time) [name: 'ix_orders_time']
+    (restaurant_id, order_time) [name: 'ix_orders_restaurant_time']
+    (order_status) [name: 'ix_orders_status']
+  }
+
+  Note: 'chk_orders_status: order_status IN (\'PLACED\', \'ACCEPTED\', \'PREPARING\', \'PICKED_UP\', \'DELIVERED\', \'CANCELLED\')\nchk_orders_fees: delivery_fee >= 0 AND platform_fee >= 0 AND packaging_fee >= 0\nchk_orders_distance: distance_km BETWEEN 0 AND 50\nchk_orders_cancel_stage: cancellation_stage IS NULL OR cancellation_stage IN (\'BEFORE_ACCEPT\', \'AFTER_ACCEPT\', \'AFTER_PICKUP\')\nchk_orders_cancel_consistent: (order_status = \'CANCELLED\') = (cancellation_stage IS NOT NULL)'
+}
+
+Table order_item {
+  order_id     "bigint unsigned" [not null]
+  menu_item_id "int unsigned" [not null]
+  quantity     "smallint unsigned" [not null]
+  unit_price   decimal(10,2) [not null]
+
+  indexes {
+    (order_id, menu_item_id) [pk]
+  }
+
+  Note: 'chk_order_item_qty: quantity BETWEEN 1 AND 50\nchk_order_item_price: unit_price >= 0'
+}
+
+Table order_cost {
+  order_id     "bigint unsigned" [pk, not null]
+  support_cost decimal(10,2) [not null, default: 0]
+
+  Note: 'chk_order_cost_support: support_cost >= 0'
+}
+
+Table delivery_trip {
+  trip_id               "bigint unsigned" [pk, increment, not null]
+  order_id              "bigint unsigned" [not null, unique]
+  partner_id            "int unsigned" [not null]
+  assigned_at           datetime [not null]
+  picked_up_at          datetime
+  delivered_at          datetime
+  promised_delivery_at  datetime [not null]
+  promised_prep_minutes "smallint unsigned" [not null]
+  actual_prep_minutes   "smallint unsigned"
+  partner_payout        decimal(10,2) [not null, default: 0]
+  incentive_amount      decimal(10,2) [not null, default: 0]
+  wait_time_pay         decimal(10,2) [not null, default: 0]
+
+  Note: 'chk_trip_pickup_after_assign: picked_up_at IS NULL OR picked_up_at >= assigned_at\nchk_trip_deliver_after_pickup: delivered_at IS NULL OR (picked_up_at IS NOT NULL AND delivered_at >= picked_up_at)\nchk_trip_promise_after_assign: promised_delivery_at > assigned_at\nchk_trip_costs: partner_payout >= 0 AND incentive_amount >= 0 AND wait_time_pay >= 0'
+}
+
+Table payment_transaction {
+  payment_id         "bigint unsigned" [pk, increment, not null]
+  order_id           "bigint unsigned" [not null]
+  gateway_name       varchar(30) [not null]
+  payment_status     varchar(20) [not null]
+  transaction_amount decimal(10,2) [not null]
+  gateway_fee        decimal(10,2) [not null, default: 0]
+  transaction_time   datetime [not null]
+
+  Note: 'chk_payment_status: payment_status IN (\'PENDING\', \'SUCCESS\', \'FAILED\', \'REVERSED\')\nchk_payment_gateway: gateway_name IN (\'RAZORPAY\', \'PAYU\', \'CASHFREE\', \'UPI_DIRECT\', \'COD\')\nchk_payment_amount: transaction_amount > 0\nchk_payment_fee: gateway_fee >= 0 AND gateway_fee <= transaction_amount'
+}
+
+Table refund {
+  refund_id        "bigint unsigned" [pk, increment, not null]
+  order_id         "bigint unsigned" [not null]
+  refund_amount    decimal(10,2) [not null]
+  recovered_amount decimal(10,2) [not null, default: 0]
+  responsibility   varchar(20) [not null]
+  refund_reason    varchar(30) [not null]
+  refund_status    varchar(20) [not null, default: 'REQUESTED']
+  created_at       datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (created_at) [name: 'ix_refund_created']
+  }
+
+  Note: 'chk_refund_amount: refund_amount > 0\nchk_refund_recovered_le_refund: recovered_amount BETWEEN 0 AND refund_amount\nchk_refund_responsibility: responsibility IN (\'RESTAURANT\', \'PARTNER\', \'PLATFORM\', \'CUSTOMER\')\nchk_refund_reason: refund_reason IN (\'LATE_DELIVERY\', \'MISSING_ITEM\', \'WRONG_ITEM\', \'QUALITY\', \'CANCELLED\', \'OTHER\')\nchk_refund_status: refund_status IN (\'REQUESTED\', \'APPROVED\', \'REJECTED\', \'PROCESSED\')'
+}
+
+Table compensation {
+  compensation_id     "bigint unsigned" [pk, increment, not null]
+  order_id            "bigint unsigned" [not null]
+  compensation_amount decimal(10,2) [not null]
+  reason              varchar(30) [not null]
+  created_at          datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  Note: 'chk_compensation_amount: compensation_amount > 0\nchk_compensation_reason: reason IN (\'DELAY_VOUCHER\', \'GOODWILL\', \'SERVICE_FAILURE\', \'OTHER\')'
+}
+
+Table campaign {
+  campaign_id   "int unsigned" [pk, increment, not null]
+  campaign_name varchar(100) [not null, unique]
+  start_date    date [not null]
+  end_date      date [not null]
+  is_active     boolean [not null, default: `TRUE`]
+
+  Note: 'chk_campaign_dates: end_date >= start_date'
+}
+
+Table coupon {
+  coupon_id             "int unsigned" [pk, increment, not null]
+  campaign_id           "int unsigned"
+  coupon_code           varchar(30) [not null, unique]
+  discount_type         varchar(10) [not null]
+  discount_value        decimal(10,2) [not null]
+  max_discount_amount   decimal(10,2)
+  funded_by             varchar(12) [not null]
+  restaurant_share_pct  decimal(5,2) [not null, default: 0]
+  free_delivery         boolean [not null, default: `FALSE`]
+  minimum_basket_amount decimal(10,2) [not null, default: 0]
+
+  Note: 'chk_coupon_type: discount_type IN (\'FLAT\', \'PERCENT\')\nchk_coupon_value: discount_value > 0 AND (discount_type = \'FLAT\' OR discount_value <= 100)\nchk_coupon_cap: max_discount_amount IS NULL OR max_discount_amount > 0\nchk_coupon_funded_by: funded_by IN (\'PLATFORM\', \'RESTAURANT\', \'SHARED\')\nchk_coupon_share: (funded_by = \'PLATFORM\' AND restaurant_share_pct = 0) OR (funded_by = \'RESTAURANT\' AND restaurant_share_pct = 100) OR (funded_by = \'SHARED\' AND restaurant_share_pct > 0 AND restaurant_share_pct < 100)\nchk_coupon_min_basket: minimum_basket_amount >= 0'
+}
+
+Table discount_usage {
+  order_id        "bigint unsigned" [not null]
+  coupon_id       "int unsigned" [not null]
+  discount_amount decimal(10,2) [not null]
+  used_at         datetime [not null]
+
+  indexes {
+    (order_id, coupon_id) [pk]
+  }
+
+  Note: 'chk_discount_usage_amount: discount_amount >= 0'
+}
+
+Table leak_type {
+  leak_type_id "smallint unsigned" [pk, increment, not null]
+  leak_name    varchar(40) [not null, unique]
+  description  varchar(255) [not null]
+  is_active    boolean [not null, default: `TRUE`]
+}
+
+Table leak_rule {
+  leak_rule_id    "smallint unsigned" [pk, increment, not null]
+  leak_type_id    "smallint unsigned" [not null]
+  rule_name       varchar(80) [not null, unique]
+  threshold_value decimal(10,2) [not null]
+  rule_config     json
+  is_active       boolean [not null, default: `TRUE`]
+  updated_at      datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  Note: 'chk_leak_rule_threshold: threshold_value >= 0'
+}
+
+Table leakage_record {
+  leakage_record_id "bigint unsigned" [pk, increment, not null]
+  order_id          "bigint unsigned" [not null]
+  leak_type_id      "smallint unsigned" [not null]
+  leak_rule_id      "smallint unsigned"
+  leak_amount       decimal(10,2) [not null]
+  is_primary        boolean [not null, default: `FALSE`]
+  detected_at       datetime [not null, default: `CURRENT_TIMESTAMP`]
+  detection_run_id  varchar(40) [not null]
+  explanation       varchar(255) [not null]
+
+  indexes {
+    (order_id, leak_type_id, detection_run_id) [unique, name: 'uq_leakage_order_type_run']
+    (detection_run_id) [name: 'ix_leakage_run']
+    (leak_type_id, detected_at) [name: 'ix_leakage_type_time']
+    // uq_leakage_one_primary: UNIQUE (order_id, detection_run_id, (IF(is_primary, 1, NULL))) - functional index, see 01_schema.sql
+  }
+
+  Note: 'chk_leakage_amount: leak_amount > 0'
+}
+
+Table recommendation {
+  recommendation_id   "bigint unsigned" [pk, increment, not null]
+  leak_type_id        "smallint unsigned"
+  target_type         varchar(20) [not null]
+  target_id           "int unsigned"
+  recommendation_text varchar(500) [not null]
+  estimated_saving    decimal(12,2) [not null, default: 0]
+  demand_risk         varchar(10) [not null]
+  priority_score      decimal(5,2) [not null]
+  created_at          datetime [not null, default: `CURRENT_TIMESTAMP`]
+  status              varchar(15) [not null, default: 'NEW']
+
+  indexes {
+    (status, priority_score) [name: 'ix_reco_status_priority']
+    (target_type, target_id) [name: 'ix_reco_target']
+  }
+
+  Note: 'chk_reco_target_type: target_type IN (\'GLOBAL\', \'REGION\', \'CITY\', \'RESTAURANT\', \'COUPON\', \'CAMPAIGN\', \'DELIVERY_PARTNER\')\nchk_reco_target_id: (target_type = \'GLOBAL\') = (target_id IS NULL)\nchk_reco_saving: estimated_saving >= 0\nchk_reco_risk: demand_risk IN (\'LOW\', \'MEDIUM\', \'HIGH\')\nchk_reco_priority: priority_score BETWEEN 0 AND 100\nchk_reco_status: status IN (\'NEW\', \'ACCEPTED\', \'REJECTED\', \'IMPLEMENTED\')'
+}
+
+Table app_role {
+  role_id     "tinyint unsigned" [pk, increment, not null]
+  role_name   varchar(20) [not null, unique]
+  description varchar(255) [not null]
+
+  Note: 'chk_app_role_name: role_name IN (\'ADMIN\', \'ANALYST\', \'VIEWER\')'
+}
+
+Table app_user {
+  user_id       "int unsigned" [pk, increment, not null]
+  role_id       "tinyint unsigned" [not null]
+  full_name     varchar(100) [not null]
+  email         varchar(120) [not null, unique]
+  password_hash varchar(255) [not null]
+  is_active     boolean [not null, default: `TRUE`]
+  created_at    datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  Note: 'chk_app_user_hash: CHAR_LENGTH(password_hash) >= 50'
+}
+
+Table audit_log {
+  audit_log_id  "bigint unsigned" [pk, increment, not null]
+  actor_user_id "int unsigned"
+  entity_name   varchar(40) [not null]
+  entity_id     varchar(40) [not null]
+  action_name   varchar(20) [not null]
+  old_values    json
+  new_values    json
+  created_at    datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (entity_name, entity_id) [name: 'ix_audit_entity']
+    (created_at) [name: 'ix_audit_created']
+  }
+
+  Note: 'chk_audit_action: action_name IN (\'INSERT\', \'UPDATE\', \'DELETE\', \'LOGIN\', \'RUN\')'
+}
+
+// ---- foreign keys (one per arrow in the relational schema diagram) ----
+Ref fk_region_parent: region.parent_region_id > region.region_id [delete: set null, update: cascade]
+Ref fk_city_region: city.region_id > region.region_id [delete: restrict, update: cascade]
+Ref fk_customer_referrer: customer.referred_by_customer_id > customer.customer_id [delete: set null, update: cascade]
+Ref fk_restaurant_city: restaurant.city_id > city.city_id [delete: restrict, update: cascade]
+Ref fk_menu_item_restaurant: menu_item.restaurant_id > restaurant.restaurant_id [delete: restrict, update: cascade]
+Ref fk_delivery_partner_city: delivery_partner.city_id > city.city_id [delete: restrict, update: cascade]
+Ref fk_orders_customer: orders.customer_id > customer.customer_id [delete: restrict, update: cascade]
+Ref fk_orders_restaurant: orders.restaurant_id > restaurant.restaurant_id [delete: restrict, update: cascade]
+Ref fk_order_item_order: order_item.order_id > orders.order_id [delete: cascade, update: cascade]
+Ref fk_order_item_menu: order_item.menu_item_id > menu_item.menu_item_id [delete: restrict, update: cascade]
+Ref fk_order_cost_order: order_cost.order_id - orders.order_id [delete: cascade, update: cascade]
+Ref fk_trip_order: delivery_trip.order_id - orders.order_id [delete: cascade, update: cascade]
+Ref fk_trip_partner: delivery_trip.partner_id > delivery_partner.partner_id [delete: restrict, update: cascade]
+Ref fk_payment_order: payment_transaction.order_id > orders.order_id [delete: restrict, update: cascade]
+Ref fk_refund_order: refund.order_id > orders.order_id [delete: restrict, update: cascade]
+Ref fk_compensation_order: compensation.order_id > orders.order_id [delete: restrict, update: cascade]
+Ref fk_coupon_campaign: coupon.campaign_id > campaign.campaign_id [delete: set null, update: cascade]
+Ref fk_discount_usage_order: discount_usage.order_id > orders.order_id [delete: cascade, update: cascade]
+Ref fk_discount_usage_coupon: discount_usage.coupon_id > coupon.coupon_id [delete: restrict, update: cascade]
+Ref fk_leak_rule_type: leak_rule.leak_type_id > leak_type.leak_type_id [delete: restrict, update: cascade]
+Ref fk_leakage_order: leakage_record.order_id > orders.order_id [delete: cascade, update: cascade]
+Ref fk_leakage_type: leakage_record.leak_type_id > leak_type.leak_type_id [delete: restrict, update: cascade]
+Ref fk_leakage_rule: leakage_record.leak_rule_id > leak_rule.leak_rule_id [delete: set null, update: cascade]
+Ref fk_reco_leak_type: recommendation.leak_type_id > leak_type.leak_type_id [delete: set null, update: cascade]
+Ref fk_app_user_role: app_user.role_id > app_role.role_id [delete: restrict, update: cascade]
+Ref fk_audit_actor: audit_log.actor_user_id > app_user.user_id [delete: set null, update: cascade]
