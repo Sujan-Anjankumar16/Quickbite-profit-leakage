@@ -6,7 +6,7 @@
 > - Section 6 lists the rules the data generator, queries and API must respect.
 > - Section 8 says what is done and what comes next.
 
-Last updated: Mon 26 Oct 2026, after Steps 1 and 2 were written.
+Last updated: Fri 6 Nov 2026, after Step 2 was run and verified.
 
 ---
 
@@ -257,7 +257,7 @@ docs/quickbite.dbml         DBML for dbdiagram.io, generated from 01_schema.sql
 docs/diagrams/              ER diagram and relational schema PDFs
 ```
 
-MySQL runs `db/mysql/*.sql` in name order only on the first start with an empty volume; after editing them, run `docker compose down -v` then `docker compose up -d`. New SQL files continue the numbering: `03_seed.sql`, `04_views.sql`, and so on.
+MySQL is published on host port **3307** (`DB_PORT` in `.env`; a native Windows MySQL owns 3306); inside Docker it is 3306. MySQL runs `db/mysql/*.sql` in name order only on the first start with an empty volume; after editing them, run `docker compose down -v` then `docker compose up -d`. New SQL files continue the numbering: `03_seed.sql`, `04_views.sql`, and so on.
 
 ---
 
@@ -268,8 +268,8 @@ MySQL runs `db/mysql/*.sql` in name order only on the first start with an empty 
 | 24–25 Oct 2026 | ER diagram and relational schema finalised after two review rounds |
 | 26 Oct 2026 | ORDER_COST kept as weak entity. Steps 1–2 files written (compose, DDL, roles, constraint tests, teaching notes, DBML). Team guide written. Not yet run against a real MySQL. |
 | 26 Oct 2026 (evening) | Person A starts Step 1: GitHub repo |
-| 27 Oct 2026 (planned) | Person A: Step 2, run the database, constraint tests, role tests |
+| 6 Nov 2026 | Student now owns both halves (A and B). **Step 2 run and verified** on MySQL 8.4.13: both init scripts clean; 23 tables, 26 FKs, 47 CHECKs, 3 app_role rows; all 16 constraint tests rejected; viewer and analyst denials confirmed. Fixes: MySQL published on host port 3307 (native MySQL94 service owns 3306), healthcheck pings 127.0.0.1 so "healthy" waits for init, two comments corrected in constraint_tests.sql. No design change. |
 
-**Next:** Step 3. Person A writes `03_seed.sql` (regions, cities, leak types, leak rules) and a DML demo script; Person B writes the generator, which needs the seed data first.
+**Next:** Step 3 (student does both parts). Write `03_seed.sql` (regions, cities, leak types, leak rules) and a DML demo script, then the generator, which needs the seed data first.
 
 **Still open:** real submission and viva dates; final API route names.

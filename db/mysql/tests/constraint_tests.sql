@@ -39,7 +39,10 @@ INSERT INTO customer (full_name, email, phone) VALUES ('Other', 'test@example.co
 -- ---- FOREIGN KEY ----
 -- EXPECT ERROR: fk_orders_customer (customer 99999 does not exist)
 INSERT INTO orders (customer_id, restaurant_id, order_time, distance_km) VALUES (99999, 900, NOW(), 2);
--- EXPECT ERROR: fk_restaurant_city ... RESTRICT: a city with restaurants cannot be deleted
+-- EXPECT ERROR: Cannot delete or update a parent row ... RESTRICT: a city that still has
+-- children cannot be deleted. City 900 has BOTH a restaurant and a delivery partner, so
+-- MySQL names whichever child it checks first (on MySQL 8.4: fk_delivery_partner_city;
+-- fk_restaurant_city would block it too).
 DELETE FROM city WHERE city_id = 900;
 
 -- ---- NOT NULL ----
@@ -70,8 +73,8 @@ INSERT INTO recommendation (target_type, target_id, recommendation_text, demand_
 VALUES ('RESTAURANT', NULL, 'Cut free delivery', 'LOW', 50);
 
 -- ---- JSON type ----
--- EXPECT ERROR: Invalid JSON text
-INSERT INTO leak_type (leak_type_id, leak_name, description) VALUES (900, 'TEST_LEAK', 'test');
+INSERT INTO leak_type (leak_type_id, leak_name, description) VALUES (900, 'TEST_LEAK', 'test');  -- valid
+-- EXPECT ERROR: Invalid JSON text (rule_config is a JSON column)
 INSERT INTO leak_rule (leak_type_id, rule_name, threshold_value, rule_config) VALUES (900, 'bad json', 10, '{not json');
 
 -- ---- functional unique index: one primary leak per order per run ----

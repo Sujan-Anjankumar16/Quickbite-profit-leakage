@@ -21,6 +21,13 @@ docker compose up -d        # MySQL, MongoDB, Redis
 docker compose ps           # wait until all are "healthy"
 ```
 
+MySQL is reachable from Windows on **localhost:3307** (set by `DB_PORT` in `.env`), because a native Windows MySQL often already uses 3306. Inside Docker it is still 3306.
+
+```bash
+# prove the constraints work (16 statements must fail, then everything is rolled back)
+docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --force quickbite' < db/mysql/tests/constraint_tests.sql
+```
+
 On first start MySQL runs every file in `db/mysql/` in name order. To start again from an empty database: `docker compose down -v && docker compose up -d`.
 
 ## Repository layout
@@ -42,7 +49,7 @@ docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schem
 |---|---|---|
 | 0 | ER diagram (2), relational schema (3) | done |
 | 1 | Repo + Docker skeleton, Git from day one (part of 2) | done |
-| 2 | DDL with constraints (4), DB roles (part of 4) | done: run and test it |
+| 2 | DDL with constraints (4), DB roles (part of 4) | done: run and verified 6 Nov 2026 |
 | 3 | Seed data + generator, DML (4) | next |
 | 4 | Views + `fn_order_contribution` | |
 | 5 | Nested / correlated / recursive / join queries (4) | |

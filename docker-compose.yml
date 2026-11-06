@@ -16,12 +16,15 @@ services:
       MYSQL_DATABASE: quickbite
       TZ: Asia/Kolkata
     ports:
-      - "3306:3306"
+      # Host port from DB_PORT (3307 by default: a native Windows MySQL often owns 3306).
+      - "${DB_PORT:-3307}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./db/mysql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      # 127.0.0.1 forces TCP. During first-start init MySQL runs a temporary
+      # server with networking off, so this only passes once init has finished.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
