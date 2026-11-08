@@ -65,6 +65,19 @@ docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -t qui
 
 `fn_order_contribution(order_id)` returns the same contribution as the view for one order (EXECUTE granted to analyst).
 
+### Queries (Step 5)
+
+```bash
+docker compose exec -T mysql sh -c 'mysql -uqb_analyst_user -pAnalyst@Dev123 -t quickbite' < db/mysql/queries/05_queries.sql
+```
+
+| Kind | Queries |
+|---|---|
+| Joins | J1 five-table join with region self-join, J2 anti-joins, J3 customer self-join, J4 RIGHT JOIN, J5 JSON rule settings + LATERAL, J6 benchmark join |
+| Nested | N1 subquery in HAVING, N2 IN, N3 scalar subquery, N4 `> ALL`, N5 NOT IN, N6 derived table |
+| Correlated | C1 refund rate vs own city, C2 NOT EXISTS, C3 per-city top item |
+| Recursive | R1 region tree roll-up, R2 referral chains, R3 month calendar with window functions |
+
 ## Repository layout
 
 ```
@@ -76,6 +89,7 @@ db/mysql/tests/constraint_tests.sql   proves every kind of constraint rejects ba
 db/mysql/tests/data_checks.sql    integrity checks on generated data + planted-leak evidence
 db/mysql/tests/view_checks.sql    view = function for every order, totals reconcile, worked example
 db/mysql/demo/dml_demo.sql        DML demonstration (one transaction, rolled back)
+db/mysql/queries/05_queries.sql   18 join, nested, correlated and recursive queries
 generator/generate_data.py        data generator (standard library, fixed seed)
 generator/hash_password.py        bcrypt hash for app_user passwords
 data/generated/                   generator output (git-ignored)
@@ -93,8 +107,8 @@ docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schem
 | 2 | DDL with constraints (4), DB roles (part of 4) | done: run and verified 6 Nov 2026 |
 | 3 | Seed data + generator, DML (4) | done: 8 Nov 2026 (60,000 orders, 6 planted leaks) |
 | 4 | Views + `fn_order_contribution` | done: 8 Nov 2026 |
-| 5 | Nested / correlated / recursive / join queries (4) | next |
-| 6 | Procedures, functions, triggers, CTEs (6) | |
+| 5 | Nested / correlated / recursive / join queries (4) | done: 8 Nov 2026 |
+| 6 | Procedures, functions, triggers, CTEs (6) | next |
 | 7 | NoSQL creation (4), NoSQL feature + RUD (7), technology justification (1) | |
 | 8 | Next.js UI (3), API integration (2), login + RBAC (4) | |
 | 9 | Documentation, demo, viva prep (2 + 4) | |
