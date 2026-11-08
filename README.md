@@ -62,8 +62,6 @@ generator/hash_password.py        bcrypt hash for app_user passwords
 data/generated/                   generator output (git-ignored)
 db/mongo/                         Mongo collections and validators (Step 7)
 docs/diagrams/                    ER diagram and relational schema
-docs/PROJECT_CONTEXT.md           full design, rules, decisions and progress (start here)
-docs/02_ddl_explained.md          why every table and constraint looks the way it does
 docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schema.sql
 ```
 
