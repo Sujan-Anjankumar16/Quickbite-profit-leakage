@@ -13,6 +13,22 @@ QuickBite's orders and revenue keep growing while net profit falls. This system 
 | Cache | Redis 7 | dashboard KPIs and leaderboards |
 | App | Next.js | UI and API routes |
 
+## Technology justification
+
+Each kind of data lives in the store that fits how it is shaped and used.
+
+| Data | Store | Why this store |
+|---|---|---|
+| Orders, items, trips, payments, refunds, coupons, customers, restaurants, partners | **MySQL** | Money and relationships. These rows must never contradict each other, so they need foreign keys, CHECK constraints, transactions (a refund and its order commit together) and exact `DECIMAL` arithmetic. The profit formulas join many tables, which is what SQL is built for. |
+| Leak rules, leak records, recommendations, users and roles, audit log | **MySQL** | They are computed from the order data and must stay consistent with it. Stored procedures, triggers and per-role privileges (RBAC inside the database) all live next to the data. |
+| `order_events` | **MongoDB** | An append-only timeline whose fields depend on the event: a payment failure carries a gateway and error code, a support chat carries minutes and a transcript id. A flexible document per event avoids a sparse table with dozens of nullable columns. |
+| `feedback` | **MongoDB** | Free text plus a variable list of tags, read one order at a time; arrays and multikey indexes fit naturally. |
+| `leak_notes` | **MongoDB** | Analyst notes: free text, tags, a status, full CRUD, and full-text search. The schema changes with how analysts work. A `$jsonSchema` validator still enforces the essential fields, and the API checks that the linked MySQL id exists. |
+| `saved_scenarios` | **MongoDB** | "What if" settings and results whose shape differs from scenario to scenario. |
+| Dashboard KPIs and leaderboards | **Redis** | Read on every page load but change only when data or a detection run changes. Caching them for 10 minutes stops repeated scans of 60,000 orders. A sorted set (`ZADD`/`ZRANGE REV`) keeps the restaurant leaderboard already ranked. Keys contain the latest detection run id and the role, so a new run is never served stale data and roles never share results. |
+
+MySQL stays the single source of truth: MongoDB and Redis hold either data that never takes part in the profit calculation (notes, events, feedback, scenarios) or a disposable copy that can be rebuilt at any time (the cache).
+
 ## Run it
 
 ```bash
@@ -91,6 +107,24 @@ docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --forc
 - `sp_generate_recommendations(run_id, OUT n)` groups a run's leaks by the target that can fix them (coupon, partner, restaurant, city, gateway) and ranks them by estimated saving and demand risk.
 - Triggers block self-referral and referral cycles, validate recommendation targets and status moves (NEW → ACCEPTED/REJECTED → IMPLEMENTED), and audit leak-rule, recommendation-status and app-user changes (actor from `@app_user_id`).
 
+### MongoDB and Redis (Step 7)
+
+```bash
+docker compose exec mongo mongosh --quiet quickbite /docker-entrypoint-initdb.d/01_init.js   # only needed on an existing volume
+cd web && npm install            # once
+npm run seed:notes               # leak notes linked to the latest detection run
+npm run test:step7               # validators, indexes, leak-notes CRUD + roles, Redis cache: all PASS
+```
+
+| Collection | Validator highlights | Indexes |
+|---|---|---|
+| `order_events` | event_type and actor enums, date, free `payload` | (order_id, at), (event_type, at) |
+| `feedback` | rating 1-5 int, comment ≤ 1000, unique tags | unique order_id, (rating, created_at), tags |
+| `leak_notes` | leak_ref {kind, id}, leak_type enum, title 3-120, tags `^[a-z0-9-]{2,30}$`, status enum, author | (leak_type, created_at), order_id, tags, leak_ref, text(title, body) |
+| `saved_scenarios` | name, author, params object | unique (author, name) |
+
+Leak-notes rules: everyone can read; analysts and admins create; only the author or an admin updates or deletes. leak_type and order_id are copied from the linked MySQL row, never trusted from the client.
+
 ## Repository layout
 
 ```
@@ -108,7 +142,10 @@ db/mysql/queries/05_queries.sql   20 join, nested, correlated, recursive and Par
 generator/generate_data.py        data generator (standard library, fixed seed)
 generator/hash_password.py        bcrypt hash for app_user passwords
 data/generated/                   generator output (git-ignored)
-db/mongo/                         Mongo collections and validators (Step 7)
+db/mongo/01_init.js               MongoDB collections, $jsonSchema validators, indexes, sample data
+web/lib/                          data layer: MySQL pool per role, leak-notes CRUD, Redis cache, dashboards
+web/scripts/seed-leak-notes.mjs   seeds leak notes linked to real MySQL leak rows
+web/scripts/test-step7.mjs        MongoDB + leak-notes CRUD + Redis tests
 docs/diagrams/                    ER diagram and relational schema
 docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schema.sql
 ```
@@ -124,8 +161,8 @@ docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schem
 | 4 | Views + `fn_order_contribution` | done: 8 Nov 2026 |
 | 5 | Nested / correlated / recursive / join queries (4) | done: 8 Nov 2026 |
 | 6 | Procedures, functions, triggers, CTEs (6) | done: 8 Nov 2026 |
-| 7 | NoSQL creation (4), NoSQL feature + RUD (7), technology justification (1) | next |
-| 8 | Next.js UI (3), API integration (2), login + RBAC (4) | |
+| 7 | NoSQL creation (4), NoSQL feature + RUD (7), technology justification (1) | done: 8 Nov 2026 |
+| 8 | Next.js UI (3), API integration (2), login + RBAC (4) | next |
 | 9 | Documentation, demo, viva prep (2 + 4) | |
 
 ## Core formulas
