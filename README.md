@@ -48,14 +48,33 @@ docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -t qui
 docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --force -t quickbite' < db/mysql/demo/dml_demo.sql
 ```
 
+### Views and contribution function (Step 4)
+
+```bash
+docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" quickbite' < db/mysql/04_views.sql      # only needed on an existing volume
+docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -t quickbite' < db/mysql/tests/view_checks.sql   # every mismatch must be 0
+```
+
+| View | One row per | Granted to |
+|---|---|---|
+| `v_order_financials` | order: subtotal, GMV, revenue, every cost, contribution, delay | analyst |
+| `v_monthly_kpi` | month (closed orders) | analyst, viewer |
+| `v_city_scorecard` | city, with state and zone | analyst, viewer |
+| `v_restaurant_scorecard` | restaurant | analyst, viewer |
+| `v_coupon_performance` | coupon | analyst |
+
+`fn_order_contribution(order_id)` returns the same contribution as the view for one order (EXECUTE granted to analyst).
+
 ## Repository layout
 
 ```
 db/mysql/01_schema.sql            23 tables with all constraints (DDL)
 db/mysql/02_roles.sql             MySQL roles qb_admin / qb_analyst / qb_viewer
 db/mysql/03_seed.sql              reference data: regions, cities, leak types, leak rules, app users
+db/mysql/04_views.sql             order financials + KPI/scorecard views, fn_order_contribution, grants
 db/mysql/tests/constraint_tests.sql   proves every kind of constraint rejects bad data
 db/mysql/tests/data_checks.sql    integrity checks on generated data + planted-leak evidence
+db/mysql/tests/view_checks.sql    view = function for every order, totals reconcile, worked example
 db/mysql/demo/dml_demo.sql        DML demonstration (one transaction, rolled back)
 generator/generate_data.py        data generator (standard library, fixed seed)
 generator/hash_password.py        bcrypt hash for app_user passwords
@@ -73,8 +92,8 @@ docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schem
 | 1 | Repo + Docker skeleton, Git from day one (part of 2) | done |
 | 2 | DDL with constraints (4), DB roles (part of 4) | done: run and verified 6 Nov 2026 |
 | 3 | Seed data + generator, DML (4) | done: 8 Nov 2026 (60,000 orders, 6 planted leaks) |
-| 4 | Views + `fn_order_contribution` | next |
-| 5 | Nested / correlated / recursive / join queries (4) | |
+| 4 | Views + `fn_order_contribution` | done: 8 Nov 2026 |
+| 5 | Nested / correlated / recursive / join queries (4) | next |
 | 6 | Procedures, functions, triggers, CTEs (6) | |
 | 7 | NoSQL creation (4), NoSQL feature + RUD (7), technology justification (1) | |
 | 8 | Next.js UI (3), API integration (2), login + RBAC (4) | |
@@ -87,4 +106,5 @@ docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schem
 - **Delivery cost** = partner payout + incentive + wait-time pay
 - **Refund loss** = refund + compensation − recovered
 - **Contribution** = revenue − platform discount − delivery cost − gateway fee − support cost − refund loss
+- Refunds count only when APPROVED or PROCESSED. A **cancelled** order has revenue 0 and platform discount 0, and its cancellation refunds are ignored; it still loses its delivery, gateway, support and compensation costs.
 - **Leak amount** = cost in excess of a benchmark (never the whole cost); the largest leak on an order is its **primary** leak.
