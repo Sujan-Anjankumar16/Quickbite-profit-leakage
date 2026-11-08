@@ -25,17 +25,20 @@ WHERE lr.detection_run_id = @run
 GROUP BY lt.leak_type_id, lt.leak_name
 ORDER BY lt.leak_type_id;
 
--- A2. Exactly one primary leak on every order that has a leak (expected 0, 0)
+-- A2. Exactly one primary leak on every order that has a leak, and it is the
+--     largest one unless it was capped at the order's loss (expected 0, 0).
+--     One pass with conditional aggregation: a correlated subquery here was
+--     fine on warm statistics but took ~10 minutes right after a fresh bulk
+--     load, when stale InnoDB statistics made MySQL pick a full scan per row.
 SELECT 'A2 primary leak count' AS check_name,
        SUM(primaries <> 1) AS orders_without_exactly_one_primary,
-       SUM(primary_not_largest) AS primary_not_the_largest
-FROM (SELECT order_id, SUM(is_primary) AS primaries,
-             MAX(is_primary AND leak_amount < (SELECT MAX(l2.leak_amount) FROM leakage_record l2
-                                               WHERE l2.order_id = lr.order_id
-                                                 AND l2.detection_run_id = @run
-                                                 AND NOT l2.is_primary)
-                 AND explanation NOT LIKE '%capped at order loss%') AS primary_not_largest
-      FROM leakage_record lr WHERE detection_run_id = @run GROUP BY order_id) x;
+       SUM(primary_amount < largest_other AND NOT capped) AS primary_not_the_largest
+FROM (SELECT order_id,
+             SUM(is_primary)                                              AS primaries,
+             MAX(IF(is_primary, leak_amount, NULL))                       AS primary_amount,
+             MAX(IF(is_primary, NULL, leak_amount))                       AS largest_other,
+             MAX(is_primary AND explanation LIKE '%capped at order loss%') AS capped
+      FROM leakage_record WHERE detection_run_id = @run GROUP BY order_id) x;
 
 -- A3. Reconciliation: SUM(primary leaks on loss-making orders) <= their total loss
 SELECT 'A3 reconciliation' AS check_name,

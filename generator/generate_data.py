@@ -788,7 +788,11 @@ def write_sql(path):
                 values = ",\n".join("(" + ", ".join(sql_value(v) for v in row) + ")"
                                     for row in rows[i:i + BATCH])
                 f.write(f"INSERT INTO {name} ({col_list}) VALUES\n{values};\n")
-        f.write("\nCOMMIT;\n\n-- Row counts after loading\n")
+        f.write("\nCOMMIT;\n\n"
+                "-- Refresh InnoDB statistics now: right after a bulk load into empty tables\n"
+                "-- they can lag for minutes, and the optimizer then plans joins badly.\n"
+                "ANALYZE TABLE " + ", ".join(TABLES) + ";\n")
+        f.write("\n-- Row counts after loading\n")
         f.write("SELECT " + ",\n       ".join(f"(SELECT COUNT(*) FROM {t}) AS {t}" for t in TABLES) + ";\n")
 
 
