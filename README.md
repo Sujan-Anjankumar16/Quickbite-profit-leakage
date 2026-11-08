@@ -125,6 +125,38 @@ npm run test:step7               # validators, indexes, leak-notes CRUD + roles,
 
 Leak-notes rules: everyone can read; analysts and admins create; only the author or an admin updates or deletes. leak_type and order_id are copied from the linked MySQL row, never trusted from the client.
 
+### Web app (Step 8)
+
+```bash
+cd web
+npm run build && npm start       # http://localhost:3000  (reads ../.env)
+npm run test:step8               # in a second terminal: 28 end-to-end checks
+npm run test:step8 -- --run      # also presses "Run detection" once (adds a detection run)
+```
+
+Demo logins (development only):
+
+| Role | Email | Password | Can |
+|---|---|---|---|
+| ADMIN | admin@quickbite.dev | Admin@App123 | everything, including Run detection |
+| ANALYST | analyst@quickbite.dev | Analyst@App123 | change recommendation status; create/edit/delete own leak notes |
+| VIEWER | viewer@quickbite.dev | Viewer@App123 | read every page; every change is refused |
+
+| Page | Data | Who can change things |
+|---|---|---|
+| Overview | `v_monthly_kpi`, `v_city_scorecard` via Redis | read-only |
+| Leaks | Pareto of leak types, restaurant leaderboard (Redis sorted set) | read-only |
+| Recommendations | `recommendation` | analyst/admin change status; a viewer's click is refused by MySQL |
+| Leak notes | MongoDB `leak_notes`, filters by type/order/tag/status/text | analyst/admin create; author or admin edit/delete |
+| Run detection | `sp_detect_leaks` + `sp_generate_recommendations`, then cache cleared | admin only |
+
+How login and RBAC work:
+- **Login** checks `app_user` with bcrypt. Only this lookup uses the admin MySQL account, because no other role may read `password_hash`. Every attempt is logged in `audit_log` (LOGIN).
+- **Session** is an httpOnly cookie holding the user and role, signed with HMAC-SHA256 using `AUTH_SECRET` (8 hours). Changing the role in the cookie breaks the signature, so the request is rejected. Set your own secret with `openssl rand -hex 32`.
+- **Database RBAC:** every API call runs on the MySQL account of the user's role (`qb_admin_user`, `qb_analyst_user`, `qb_viewer_user`). A viewer pressing "Accept" on a recommendation reaches MySQL, which answers `UPDATE command denied`; the page shows that as *Access denied by MySQL*.
+- **App RBAC:** page and route checks cover what MySQL cannot know about: Run detection is admin-only, and leak notes live in MongoDB, so viewers' writes are refused by the API.
+- **Audit:** the API sets `@app_user_id` on its MySQL connection, so the triggers record which app user changed a recommendation or ran detection.
+
 ## Repository layout
 
 ```
@@ -146,6 +178,8 @@ db/mongo/01_init.js               MongoDB collections, $jsonSchema validators, i
 web/lib/                          data layer: MySQL pool per role, leak-notes CRUD, Redis cache, dashboards
 web/scripts/seed-leak-notes.mjs   seeds leak notes linked to real MySQL leak rows
 web/scripts/test-step7.mjs        MongoDB + leak-notes CRUD + Redis tests
+web/app/                          Next.js pages and API routes (app router)
+web/scripts/test-step8.mjs        end-to-end HTTP tests: login, every page, every API route, RBAC
 docs/diagrams/                    ER diagram and relational schema
 docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schema.sql
 ```
@@ -162,8 +196,8 @@ docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schem
 | 5 | Nested / correlated / recursive / join queries (4) | done: 8 Nov 2026 |
 | 6 | Procedures, functions, triggers, CTEs (6) | done: 8 Nov 2026 |
 | 7 | NoSQL creation (4), NoSQL feature + RUD (7), technology justification (1) | done: 8 Nov 2026 |
-| 8 | Next.js UI (3), API integration (2), login + RBAC (4) | next |
-| 9 | Documentation, demo, viva prep (2 + 4) | |
+| 8 | Next.js UI (3), API integration (2), login + RBAC (4) | done: 8 Nov 2026 |
+| 9 | Documentation, demo, viva prep (2 + 4) | next |
 
 ## Core formulas
 
