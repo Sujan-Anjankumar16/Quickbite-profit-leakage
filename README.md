@@ -77,6 +77,19 @@ docker compose exec -T mysql sh -c 'mysql -uqb_analyst_user -pAnalyst@Dev123 -t 
 | Nested | N1 subquery in HAVING, N2 IN, N3 scalar subquery, N4 `> ALL`, N5 NOT IN, N6 derived table |
 | Correlated | C1 refund rate vs own city, C2 NOT EXISTS, C3 per-city top item |
 | Recursive | R1 region tree roll-up, R2 referral chains, R3 month calendar with window functions |
+| CTE + window | P1 Pareto of leak types, P2 Pareto of restaurants (which make up 80% of leak loss, latest run, primary leaks) |
+
+### Leak detection and recommendations (Step 6)
+
+```bash
+docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" quickbite' < db/mysql/06_procedures.sql   # only needed on an existing volume
+docker compose exec -T mysql sh -c 'mysql -uqb_analyst_user -pAnalyst@Dev123 -t quickbite -e "CALL sp_detect_leaks(\"2025-11-01\", \"2026-11-01\", @run, @leaks); CALL sp_generate_recommendations(@run, @recos); SELECT @run, @leaks, @recos;"'
+docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --force -t quickbite' < db/mysql/tests/procedure_checks.sql   # 7 errors are expected (trigger tests)
+```
+
+- `sp_detect_leaks(from, to, OUT run_id, OUT leaks)` applies the six active leak rules to closed orders in one CTE pipeline, marks the largest leak on each order as primary, and caps it at the order's loss so primary leaks never exceed total loss.
+- `sp_generate_recommendations(run_id, OUT n)` groups a run's leaks by the target that can fix them (coupon, partner, restaurant, city, gateway) and ranks them by estimated saving and demand risk.
+- Triggers block self-referral and referral cycles, validate recommendation targets and status moves (NEW → ACCEPTED/REJECTED → IMPLEMENTED), and audit leak-rule, recommendation-status and app-user changes (actor from `@app_user_id`).
 
 ## Repository layout
 
@@ -85,11 +98,13 @@ db/mysql/01_schema.sql            23 tables with all constraints (DDL)
 db/mysql/02_roles.sql             MySQL roles qb_admin / qb_analyst / qb_viewer
 db/mysql/03_seed.sql              reference data: regions, cities, leak types, leak rules, app users
 db/mysql/04_views.sql             order financials + KPI/scorecard views, fn_order_contribution, grants
+db/mysql/06_procedures.sql        functions, triggers, sp_detect_leaks, sp_generate_recommendations
 db/mysql/tests/constraint_tests.sql   proves every kind of constraint rejects bad data
 db/mysql/tests/data_checks.sql    integrity checks on generated data + planted-leak evidence
 db/mysql/tests/view_checks.sql    view = function for every order, totals reconcile, worked example
+db/mysql/tests/procedure_checks.sql  latest detection run, reconciliation, every trigger
 db/mysql/demo/dml_demo.sql        DML demonstration (one transaction, rolled back)
-db/mysql/queries/05_queries.sql   18 join, nested, correlated and recursive queries
+db/mysql/queries/05_queries.sql   20 join, nested, correlated, recursive and Pareto CTE queries
 generator/generate_data.py        data generator (standard library, fixed seed)
 generator/hash_password.py        bcrypt hash for app_user passwords
 data/generated/                   generator output (git-ignored)
@@ -108,8 +123,8 @@ docs/quickbite.dbml               DBML for dbdiagram.io, generated from 01_schem
 | 3 | Seed data + generator, DML (4) | done: 8 Nov 2026 (60,000 orders, 6 planted leaks) |
 | 4 | Views + `fn_order_contribution` | done: 8 Nov 2026 |
 | 5 | Nested / correlated / recursive / join queries (4) | done: 8 Nov 2026 |
-| 6 | Procedures, functions, triggers, CTEs (6) | next |
-| 7 | NoSQL creation (4), NoSQL feature + RUD (7), technology justification (1) | |
+| 6 | Procedures, functions, triggers, CTEs (6) | done: 8 Nov 2026 |
+| 7 | NoSQL creation (4), NoSQL feature + RUD (7), technology justification (1) | next |
 | 8 | Next.js UI (3), API integration (2), login + RBAC (4) | |
 | 9 | Documentation, demo, viva prep (2 + 4) | |
 

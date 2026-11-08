@@ -26,6 +26,8 @@
 --    R1  WITH RECURSIVE region tree + roll-up             contribution at every level
 --    R2  WITH RECURSIVE referral chains                   chain depth and network size
 --    R3  WITH RECURSIVE month calendar + window functions running total, month-on-month
+--    P1  CTE chain + running SUM() OVER                   Pareto: leak types making up 80% of leak loss
+--    P2  CTE chain + running SUM() OVER                   Pareto: restaurants making up 80% (summary + top 15)
 -- =====================================================================
 USE quickbite;
 
@@ -342,3 +344,104 @@ SELECT DATE_FORMAT(m.month_start, '%Y-%m')                         AS month,
 FROM months m
 LEFT JOIN v_monthly_kpi k ON k.order_month = DATE_FORMAT(m.month_start, '%Y-%m')
 ORDER BY m.month_start;
+
+-- =====================================================================
+--  PARETO (non-recursive CTE chains + window functions)
+--  "Which few causes make up 80% of the leak loss?"
+--  Uses PRIMARY leaks of the LATEST detection run, so every order is counted
+--  once (LOW_VALUE_ORDER is the order's whole loss and would otherwise
+--  double-count with the other types). The cut-off keeps every row whose
+--  cumulative share BEFORE it was still below 80%, i.e. the row that crosses
+--  80% is included.
+-- =====================================================================
+
+-- P1. Pareto by leak type
+WITH
+latest_run AS (
+  SELECT detection_run_id FROM leakage_record
+  ORDER BY detected_at DESC, leakage_record_id DESC LIMIT 1
+),
+by_type AS (
+  SELECT lt.leak_name, COUNT(*) AS orders, SUM(lr.leak_amount) AS leak
+  FROM leakage_record lr
+  JOIN latest_run run ON run.detection_run_id = lr.detection_run_id
+  JOIN leak_type lt   ON lt.leak_type_id = lr.leak_type_id
+  WHERE lr.is_primary
+  GROUP BY lt.leak_name
+),
+pareto AS (
+  SELECT leak_name, orders, leak,
+         ROUND(100 * leak / SUM(leak) OVER (), 1)                                   AS pct,
+         ROUND(100 * SUM(leak) OVER (ORDER BY leak DESC) / SUM(leak) OVER (), 1)    AS cum_pct,
+         100 * (SUM(leak) OVER (ORDER BY leak DESC) - leak) / SUM(leak) OVER ()     AS cum_before
+  FROM by_type
+)
+SELECT leak_name, orders, leak, pct, cum_pct,
+       IF(cum_before < 80, 'yes', '') AS in_top_80
+FROM pareto
+ORDER BY leak DESC;
+
+-- P2. Pareto by restaurant: how many restaurants make up 80% of the loss?
+WITH
+latest_run AS (
+  SELECT detection_run_id FROM leakage_record
+  ORDER BY detected_at DESC, leakage_record_id DESC LIMIT 1
+),
+by_restaurant AS (
+  SELECT o.restaurant_id, SUM(lr.leak_amount) AS leak
+  FROM leakage_record lr
+  JOIN latest_run run ON run.detection_run_id = lr.detection_run_id
+  JOIN orders o       ON o.order_id = lr.order_id
+  WHERE lr.is_primary
+  GROUP BY o.restaurant_id
+),
+pareto AS (
+  SELECT restaurant_id, leak,
+         ROW_NUMBER() OVER (ORDER BY leak DESC, restaurant_id)                                AS rank_no,
+         100 * SUM(leak) OVER (ORDER BY leak DESC, restaurant_id) / SUM(leak) OVER ()         AS cum_pct,
+         100 * (SUM(leak) OVER (ORDER BY leak DESC, restaurant_id) - leak) / SUM(leak) OVER () AS cum_before
+  FROM by_restaurant
+)
+SELECT COUNT(*)                                                      AS restaurants_with_leaks,
+       SUM(cum_before < 80)                                          AS restaurants_for_80_pct,
+       ROUND(100 * SUM(cum_before < 80) / COUNT(*), 1)               AS pct_of_restaurants,
+       ROUND(SUM(IF(cum_before < 80, leak, 0)), 2)                   AS their_leak,
+       ROUND(SUM(leak), 2)                                           AS total_leak,
+       (SELECT ROUND(100 * SUM(leak) / (SELECT SUM(leak) FROM pareto), 1)
+        FROM pareto WHERE rank_no <= 0.2 * (SELECT COUNT(*) FROM pareto)) AS top_20pct_share_of_leak
+FROM pareto;
+
+WITH
+latest_run AS (
+  SELECT detection_run_id FROM leakage_record
+  ORDER BY detected_at DESC, leakage_record_id DESC LIMIT 1
+),
+by_restaurant AS (
+  SELECT o.restaurant_id, SUM(lr.leak_amount) AS leak,
+         SUM(lr.leak_type_id = 1) AS discount_orders, COUNT(*) AS leak_orders
+  FROM leakage_record lr
+  JOIN latest_run run ON run.detection_run_id = lr.detection_run_id
+  JOIN orders o       ON o.order_id = lr.order_id
+  WHERE lr.is_primary
+  GROUP BY o.restaurant_id
+),
+pareto AS (
+  SELECT restaurant_id, leak, leak_orders, discount_orders,
+         ROW_NUMBER() OVER (ORDER BY leak DESC, restaurant_id)                         AS rank_no,
+         ROUND(100 * SUM(leak) OVER (ORDER BY leak DESC, restaurant_id) / SUM(leak) OVER (), 1) AS cum_pct
+  FROM by_restaurant
+)
+SELECT p.rank_no, p.restaurant_id, r.restaurant_name, ci.city_name,
+       p.leak_orders, p.leak, p.cum_pct,
+       (SELECT lt.leak_name
+        FROM leakage_record lr2
+        JOIN latest_run run2 ON run2.detection_run_id = lr2.detection_run_id
+        JOIN orders o2       ON o2.order_id = lr2.order_id
+        JOIN leak_type lt    ON lt.leak_type_id = lr2.leak_type_id
+        WHERE lr2.is_primary AND o2.restaurant_id = p.restaurant_id
+        GROUP BY lt.leak_name ORDER BY SUM(lr2.leak_amount) DESC LIMIT 1) AS main_leak
+FROM pareto p
+JOIN restaurant r ON r.restaurant_id = p.restaurant_id
+JOIN city ci      ON ci.city_id = r.city_id
+WHERE p.rank_no <= 15
+ORDER BY p.rank_no;
